@@ -7,9 +7,6 @@ local M = {}
 local state = {
   buf = nil,
   win = nil,
-  preview_buf = nil,
-  preview_win = nil,
-  preview_task = nil,
   search_buf = nil,
   search_win = nil,
   tasks_by_line = {},
@@ -188,79 +185,7 @@ function M.render(config, all_tasks, filter_text)
   return lines, highlights, task_line_map
 end
 
--- ── preview (read-only hover below dashboard) ────────────────────────
-
-function M.show_note_preview()
-  if not state.win or not vim.api.nvim_win_is_valid(state.win) then return end
-  -- Don't show preview if we're in note view
-  if state.note_path then return end
-
-  local line = vim.api.nvim_win_get_cursor(state.win)[1]
-  local task = state.tasks_by_line[line]
-
-  if task and task == state.preview_task then return end
-  M.close_preview()
-
-  if not task or not task.note_link then
-    state.preview_task = nil
-    return
-  end
-
-  local note_path = parser.resolve_note_path(task.note_link, state.config.vault_path)
-  if vim.fn.filereadable(note_path) ~= 1 then
-    state.preview_task = nil
-    return
-  end
-
-  local note_lines = vim.fn.readfile(note_path)
-  if #note_lines == 0 then
-    state.preview_task = nil
-    return
-  end
-
-  local L = state.layout
-  local preview_height = math.min(#note_lines + 2, 15)
-  local preview_row = L.row + L.height + 1
-  local editor_height = vim.o.lines
-  if preview_row + preview_height > editor_height - 2 then
-    preview_height = math.max(editor_height - 2 - preview_row, 3)
-  end
-
-  local preview_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, note_lines)
-  vim.bo[preview_buf].buftype = "nofile"
-  vim.bo[preview_buf].bufhidden = "wipe"
-  vim.bo[preview_buf].filetype = "markdown"
-  vim.bo[preview_buf].modifiable = false
-
-  local preview_win = vim.api.nvim_open_win(preview_buf, false, {
-    relative = "editor",
-    width = L.width,
-    height = preview_height,
-    row = preview_row,
-    col = L.col,
-    style = "minimal",
-    border = {'┏', '━', '┓', '┃', '┛', '━', '┗', '┃'},
-    title = " " .. task.note_link .. " ",
-    title_pos = "center",
-    focusable = false,
-  })
-
-  vim.wo[preview_win].wrap = true
-
-  state.preview_buf = preview_buf
-  state.preview_win = preview_win
-  state.preview_task = task
-end
-
-function M.close_preview()
-  if state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
-    vim.api.nvim_win_close(state.preview_win, true)
-  end
-  state.preview_win = nil
-  state.preview_buf = nil
-  state.preview_task = nil
-end
+function M.close_preview() end
 
 -- ── note view (editable, in same float) ──────────────────────────────
 
@@ -666,12 +591,6 @@ function M.open(config, custom_query)
   vim.keymap.set("n", "n", function() require("tasks.actions").create_task(config) end, opts)
   vim.keymap.set("n", "/", function() M.start_search() end, opts)
 
-  -- CursorMoved shows preview
-  vim.api.nvim_create_autocmd("CursorMoved", {
-    buffer = buf,
-    callback = function() M.show_note_preview() end,
-  })
-
   -- Place cursor on first task
   vim.schedule(function()
     local total = vim.api.nvim_buf_line_count(buf)
@@ -681,7 +600,6 @@ function M.open(config, custom_query)
         break
       end
     end
-    M.show_note_preview()
   end)
 end
 
