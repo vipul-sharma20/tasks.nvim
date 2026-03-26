@@ -14,6 +14,7 @@ local state = {
   config = nil,
   custom_query = nil,
   filter_text = nil,
+  expanded_sections = {}, -- tracks which collapsed sections are expanded
   -- note view state
   note_path = nil,
   note_task = nil,
@@ -22,6 +23,9 @@ local state = {
   -- layout
   layout = { row = 0, col = 0, width = 0, height = 0 },
 }
+
+local undo_stack = {}
+local redo_stack = {}
 
 -- ── helpers ──────────────────────────────────────────────────────────
 
@@ -102,7 +106,58 @@ local function filter_tasks(tasks, filter)
   return result
 end
 
+--- Check if a tasks_by_line entry is a real task (not a section header)
+local function is_task_line(entry)
+  return entry and not entry._section_index
+end
+
+--- Get section index from a tasks_by_line entry (for header lines)
+local function get_section_index(entry)
+  return entry and entry._section_index
+end
+
 -- ── render ───────────────────────────────────────────────────────────
+
+--- Render a list of tasks into lines/highlights
+local function render_task_list(tasks, config, lines, highlights, task_line_map)
+  local date_col = config._inner_width - 10
+
+  for _, task in ipairs(tasks) do
+    local symbol = get_symbol(task.status, config)
+    local desc = task.description
+    local note_indicator = task.note_link and " 📎" or ""
+    local due_str = format_due_short(task.due)
+
+    local left = "  " .. symbol .. " " .. desc .. note_indicator
+    local left_display_width = vim.fn.strdisplaywidth(left)
+
+    if left_display_width > date_col - 2 then
+      local avail = date_col - 4 - vim.fn.strdisplaywidth("  " .. symbol .. " ") - vim.fn.strdisplaywidth(note_indicator)
+      if avail > 3 then
+        desc = vim.fn.strcharpart(desc, 0, avail) .. "…"
+      end
+      left = "  " .. symbol .. " " .. desc .. note_indicator
+      left_display_width = vim.fn.strdisplaywidth(left)
+    end
+
+    local pad = math.max(date_col - left_display_width - vim.fn.strdisplaywidth(due_str), 1)
+    local task_line = left .. string.rep(" ", pad) .. due_str
+
+    table.insert(lines, task_line)
+    local ln = #lines
+    task_line_map[ln] = task
+
+    local sym_byte_end = #("  " .. symbol)
+    table.insert(highlights, { ln, 2, sym_byte_end, get_symbol_highlight(task.status) })
+    local desc_byte_start = sym_byte_end + 1
+    local desc_byte_end = desc_byte_start + #desc
+    table.insert(highlights, { ln, desc_byte_start, desc_byte_end, get_task_highlight(task) })
+    if due_str ~= "" then
+      local due_byte_start = #task_line - #due_str
+      table.insert(highlights, { ln, due_byte_start, #task_line, get_due_highlight(task) })
+    end
+  end
+end
 
 function M.render(config, all_tasks, filter_text)
   local lines = {}
@@ -121,64 +176,47 @@ function M.render(config, all_tasks, filter_text)
   table.insert(highlights, { #lines, 0, #lines[#lines], "NTasksBorder" })
   table.insert(lines, "")
 
-  for _, section in ipairs(config.sections) do
+  for si, section in ipairs(config.sections) do
     local filtered = query.evaluate(section.query, all_tasks)
     filtered = filter_tasks(filtered, filter_text)
 
-    local header = "  " .. section.name
+    local is_collapsed = section.collapsed and not state.expanded_sections[si]
+    local chevron = is_collapsed and "▸" or (section.collapsed and "▾" or "")
+    local header = "  " .. (chevron ~= "" and (chevron .. " ") or "") .. section.name
+
+    if is_collapsed then
+      -- Show header with count only
+      local count_suffix = " (" .. #filtered .. ")"
+      header = header .. count_suffix
+    end
+
     table.insert(lines, header)
     table.insert(highlights, { #lines, 0, #header, "NTasksHeader" })
 
-    if #filtered == 0 then
+    -- Store section index on the header line so <Tab> can toggle it
+    task_line_map[#lines] = { _section_index = si }
+
+    if is_collapsed then
+      -- Don't render tasks, just a blank line
+      table.insert(lines, "")
+    elseif #filtered == 0 then
       table.insert(lines, "    (none)")
       table.insert(highlights, { #lines, 0, #lines[#lines], "NTasksCount" })
+      table.insert(lines, "")
     else
-      local date_col = config._inner_width - 10
+      render_task_list(filtered, config, lines, highlights, task_line_map)
 
-      for _, task in ipairs(filtered) do
-        local symbol = get_symbol(task.status, config)
-        local desc = task.description
-        local note_indicator = task.note_link and " 📎" or ""
-        local due_str = format_due_short(task.due)
-
-        local left = "  " .. symbol .. " " .. desc .. note_indicator
-        local left_display_width = vim.fn.strdisplaywidth(left)
-
-        if left_display_width > date_col - 2 then
-          local avail = date_col - 4 - vim.fn.strdisplaywidth("  " .. symbol .. " ") - vim.fn.strdisplaywidth(note_indicator)
-          if avail > 3 then
-            desc = vim.fn.strcharpart(desc, 0, avail) .. "…"
-          end
-          left = "  " .. symbol .. " " .. desc .. note_indicator
-          left_display_width = vim.fn.strdisplaywidth(left)
-        end
-
-        local pad = math.max(date_col - left_display_width - vim.fn.strdisplaywidth(due_str), 1)
-        local task_line = left .. string.rep(" ", pad) .. due_str
-
-        table.insert(lines, task_line)
-        local ln = #lines
-        task_line_map[ln] = task
-
-        local sym_byte_end = #("  " .. symbol)
-        table.insert(highlights, { ln, 2, sym_byte_end, get_symbol_highlight(task.status) })
-        local desc_byte_start = sym_byte_end + 1
-        local desc_byte_end = desc_byte_start + #desc
-        table.insert(highlights, { ln, desc_byte_start, desc_byte_end, get_task_highlight(task) })
-        if due_str ~= "" then
-          local due_byte_start = #task_line - #due_str
-          table.insert(highlights, { ln, due_byte_start, #task_line, get_due_highlight(task) })
-        end
-      end
+      local count_str = "  " .. #filtered .. " task" .. (#filtered ~= 1 and "s" or "")
+      table.insert(lines, count_str)
+      table.insert(highlights, { #lines, 0, #count_str, "NTasksCount" })
+      table.insert(lines, "")
     end
-
-    local count_str = "  " .. #filtered .. " task" .. (#filtered ~= 1 and "s" or "")
-    table.insert(lines, count_str)
-    table.insert(highlights, { #lines, 0, #count_str, "NTasksCount" })
-    table.insert(lines, "")
   end
 
-  local help = "  x:done p:prog -:cancel ␣:todo d:due /:search ⏎:context o:src n:new r:refresh q:close"
+  local undo_redo = ""
+  if #undo_stack > 0 then undo_redo = undo_redo .. " u:undo" end
+  if #redo_stack > 0 then undo_redo = undo_redo .. " C-r:redo" end
+  local help = "  x:done p:prog -:cancel ␣:todo d:due /:search ⏎:context o:src n:new r:refresh" .. undo_redo .. " q:close"
   table.insert(lines, help)
   table.insert(highlights, { #lines, 0, #help, "NTasksHelp" })
 
@@ -518,18 +556,27 @@ function M.open(config, custom_query)
 
   local opts = { buffer = buf, noremap = true, silent = true }
 
-  -- j/k only land on task lines
+  -- j/k land on task lines and collapsed section headers
+  local function is_navigable(entry)
+    if not entry then return false end
+    if is_task_line(entry) then return true end
+    -- Allow landing on collapsed section headers (for <Tab> expand)
+    local si = get_section_index(entry)
+    if si then return true end
+    return false
+  end
+
   vim.keymap.set("n", "j", function()
     local cur = vim.api.nvim_win_get_cursor(state.win)[1]
     local total = vim.api.nvim_buf_line_count(state.buf)
     for i = cur + 1, total do
-      if state.tasks_by_line[i] then
+      if is_navigable(state.tasks_by_line[i]) then
         vim.api.nvim_win_set_cursor(state.win, { i, 0 })
         return
       end
     end
     for i = 1, cur do
-      if state.tasks_by_line[i] then
+      if is_navigable(state.tasks_by_line[i]) then
         vim.api.nvim_win_set_cursor(state.win, { i, 0 })
         return
       end
@@ -540,18 +587,32 @@ function M.open(config, custom_query)
     local cur = vim.api.nvim_win_get_cursor(state.win)[1]
     local total = vim.api.nvim_buf_line_count(state.buf)
     for i = cur - 1, 1, -1 do
-      if state.tasks_by_line[i] then
+      if is_navigable(state.tasks_by_line[i]) then
         vim.api.nvim_win_set_cursor(state.win, { i, 0 })
         return
       end
     end
     for i = total, cur, -1 do
-      if state.tasks_by_line[i] then
+      if is_navigable(state.tasks_by_line[i]) then
         vim.api.nvim_win_set_cursor(state.win, { i, 0 })
         return
       end
     end
   end, opts)
+
+  -- <Tab> toggles collapsed sections
+  vim.keymap.set("n", "<Tab>", function()
+    local cur = vim.api.nvim_win_get_cursor(state.win)[1]
+    local entry = state.tasks_by_line[cur]
+    local si = get_section_index(entry)
+    if si then
+      state.expanded_sections[si] = not state.expanded_sections[si]
+      redraw_dashboard()
+    end
+  end, opts)
+
+  vim.keymap.set("n", "u", function() M.undo_last() end, opts)
+  vim.keymap.set("n", "<C-r>", function() M.redo_last() end, opts)
 
   -- :q / :wq / :x in dashboard closes the float
   vim.keymap.set("c", "<CR>", function()
@@ -581,7 +642,7 @@ function M.open(config, custom_query)
   vim.keymap.set("n", "d", function()
     local line = vim.api.nvim_win_get_cursor(state.win)[1]
     local task = state.tasks_by_line[line]
-    if not task then return end
+    if not is_task_line(task) then return end
     require("tasks.actions").prompt_due_date(task, function()
       state.all_tasks = scanner.scan_deduped(state.config.vault_path)
       redraw_dashboard()
@@ -591,16 +652,63 @@ function M.open(config, custom_query)
   vim.keymap.set("n", "n", function() require("tasks.actions").create_task(config) end, opts)
   vim.keymap.set("n", "/", function() M.start_search() end, opts)
 
-  -- Place cursor on first task
+  -- Place cursor on first task line (not section headers)
   vim.schedule(function()
     local total = vim.api.nvim_buf_line_count(buf)
     for i = 1, total do
-      if state.tasks_by_line[i] then
+      if is_task_line(state.tasks_by_line[i]) then
         vim.api.nvim_win_set_cursor(win, { i, 0 })
         break
       end
     end
   end)
+end
+
+-- ── undo ─────────────────────────────────────────────────────────────
+
+local function apply_undo_redo(from_stack, to_stack, label)
+  if #from_stack == 0 then
+    vim.notify("tasks: nothing to " .. label, vim.log.levels.INFO)
+    return
+  end
+
+  local entry = table.remove(from_stack)
+  local task = entry.task
+
+  -- Save current state to the other stack before reverting
+  table.insert(to_stack, {
+    task = task,
+    old_status = task.status,
+    old_completion = task.completion,
+  })
+
+  -- Apply the stored status
+  require("tasks.actions").set_task_status(task, entry.old_status)
+  task.completion = entry.old_completion
+
+  local bufnr = vim.fn.bufnr(task.source_file)
+  if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified then
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent! write")
+    end)
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(state.win)
+  redraw_dashboard()
+  local line_count = vim.api.nvim_buf_line_count(state.buf)
+  if cursor[1] <= line_count then
+    vim.api.nvim_win_set_cursor(state.win, cursor)
+  end
+
+  vim.notify("tasks: " .. label .. " → [" .. entry.old_status .. "]", vim.log.levels.INFO)
+end
+
+function M.undo_last()
+  apply_undo_redo(undo_stack, redo_stack, "undo")
+end
+
+function M.redo_last()
+  apply_undo_redo(redo_stack, undo_stack, "redo")
 end
 
 -- ── close ────────────────────────────────────────────────────────────
@@ -628,7 +736,6 @@ function M.close()
   state.note_path = nil
   state.note_task = nil
   state.note_buf = nil
-  state.preview_task = nil
   state.tasks_by_line = {}
   state.all_tasks = {}
   state.filter_text = nil
@@ -641,7 +748,7 @@ function M.open_note()
   if not state.win or not vim.api.nvim_win_is_valid(state.win) then return end
   local line = vim.api.nvim_win_get_cursor(state.win)[1]
   local task = state.tasks_by_line[line]
-  if not task then return end
+  if not is_task_line(task) then return end
 
   if not task.note_link then
     require("tasks.actions").add_note_to_task(task, state.config)
@@ -656,7 +763,7 @@ function M.jump_to_source()
   if not state.win or not vim.api.nvim_win_is_valid(state.win) then return end
   local line = vim.api.nvim_win_get_cursor(state.win)[1]
   local task = state.tasks_by_line[line]
-  if not task then return end
+  if not is_task_line(task) then return end
 
   M.close()
   vim.cmd("edit " .. vim.fn.fnameescape(task.source_file))
@@ -668,7 +775,15 @@ function M.set_status(new_status)
   if not state.win or not vim.api.nvim_win_is_valid(state.win) then return end
   local line = vim.api.nvim_win_get_cursor(state.win)[1]
   local task = state.tasks_by_line[line]
-  if not task then return end
+  if not is_task_line(task) then return end
+
+  -- Push to undo stack, clear redo
+  table.insert(undo_stack, {
+    task = task,
+    old_status = task.status,
+    old_completion = task.completion,
+  })
+  redo_stack = {}
 
   require("tasks.actions").set_task_status(task, new_status)
 

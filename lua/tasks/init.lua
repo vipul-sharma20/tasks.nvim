@@ -10,6 +10,7 @@ local defaults = {
     { name = "P0 (Overdue)", query = "not done\ndue before today\nsort by due" },
     { name = "P1 (Due Today)", query = "not done\ndue today\nsort by due" },
     { name = "All Pending", query = "not done\n(due after today) OR (no due date)" },
+    { name = "Recently Done", query = "done\ncompleted in last 7 days\nsort by due", collapsed = true },
   },
   symbols = {
     todo = "✗",

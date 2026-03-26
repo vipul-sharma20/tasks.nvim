@@ -56,6 +56,15 @@ local function parse_clause(clause)
     end
   end
 
+  -- completed in last N days
+  local days = clause:match("^completed in last (%d+) days$")
+  if days then
+    local cutoff = os.date("%Y-%m-%d", os.time() - tonumber(days) * 86400)
+    return function(task)
+      return task.completion ~= nil and task.completion >= cutoff
+    end
+  end
+
   -- has due date
   if clause == "has due date" then
     return function(task)
