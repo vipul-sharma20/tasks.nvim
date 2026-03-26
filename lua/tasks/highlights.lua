@@ -51,6 +51,13 @@ function M.setup()
   vim.api.nvim_set_hl(0, "NTasksSymbolDone", { fg = colors.green })
   vim.api.nvim_set_hl(0, "NTasksSymbolCancelled", { fg = colors.overlay0 })
 
+  -- Priority indicators
+  vim.api.nvim_set_hl(0, "NTasksPrioHighest", { fg = colors.red, bold = true })
+  vim.api.nvim_set_hl(0, "NTasksPrioHigh", { fg = colors.red })
+  vim.api.nvim_set_hl(0, "NTasksPrioMedium", { fg = colors.yellow })
+  vim.api.nvim_set_hl(0, "NTasksPrioLow", { fg = colors.overlay0 })
+  vim.api.nvim_set_hl(0, "NTasksPrioLowest", { fg = colors.overlay0, italic = true })
+
   -- Due date column
   vim.api.nvim_set_hl(0, "NTasksDueDateOverdue", { fg = colors.red, italic = true })
   vim.api.nvim_set_hl(0, "NTasksDueDateToday", { fg = colors.yellow, italic = true })
