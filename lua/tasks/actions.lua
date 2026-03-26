@@ -2,6 +2,19 @@ local parser = require("tasks.parser")
 
 local M = {}
 
+--- Slugify a string for use as a filename
+---@param str string
+---@return string
+local function slugify(str)
+  local slug = str:lower()
+  slug = slug:gsub("[^%w%s-]", "")
+  slug = slug:gsub("%s+", "-")
+  slug = slug:gsub("%-+", "-")
+  slug = slug:gsub("^%-+", "")
+  slug = slug:gsub("%-+$", "")
+  return slug
+end
+
 --- Resolve natural language date input to YYYY-MM-DD
 ---@param input string date input like "tomorrow", "today", "next week", or "2026-03-25"
 ---@return string|nil resolved date string, or nil if empty
@@ -183,6 +196,167 @@ function M.prompt_due_date(task, callback)
   end)
 end
 
+--- Read a task's source line from buffer or file
+---@param task table parsed task
+---@return string|nil line_content
+---@return number|nil bufnr (-1 if read from file)
+local function read_task_line(task)
+  if not task.source_file or not task.source_line then return nil, nil end
+  local bufnr = vim.fn.bufnr(task.source_file)
+  if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, task.source_line - 1, task.source_line, false)
+    if #lines == 0 then return nil, nil end
+    return lines[1], bufnr
+  else
+    local file_lines = vim.fn.readfile(task.source_file)
+    if task.source_line > #file_lines then return nil, nil end
+    return file_lines[task.source_line], -1
+  end
+end
+
+--- Write a line back to the task's source
+local function write_task_line(task, new_line, bufnr)
+  if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
+    vim.api.nvim_buf_set_lines(bufnr, task.source_line - 1, task.source_line, false, { new_line })
+    vim.bo[bufnr].modified = true
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent! write")
+    end)
+  else
+    local file_lines = vim.fn.readfile(task.source_file)
+    file_lines[task.source_line] = new_line
+    vim.fn.writefile(file_lines, task.source_file)
+  end
+  task.raw = new_line
+end
+
+--- Full edit workflow for a task: description, due, priority.
+--- Renames linked note file if description changes.
+---@param task table parsed task
+---@param config table plugin config
+---@param callback function|nil called after edit
+function M.edit_task(task, config, callback)
+  if not task.source_file or not task.source_line then
+    vim.notify("tasks: no source location for task", vim.log.levels.WARN)
+    return
+  end
+
+  -- Step 1: Description
+  vim.ui.input({
+    prompt = "Description: ",
+    default = task.description,
+  }, function(new_desc)
+    if new_desc == nil then return end -- cancelled
+    if new_desc == "" then new_desc = task.description end
+
+    -- Step 2: Due date
+    vim.ui.input({
+      prompt = "Due (YYYY-MM-DD/today/tomorrow/+3d, empty to remove): ",
+      default = task.due or "",
+    }, function(due_input)
+      if due_input == nil then return end -- cancelled
+
+      -- Step 3: Priority
+      vim.ui.input({
+        prompt = "Priority (highest/high/medium/low/lowest, empty to remove): ",
+        default = task.priority or "",
+      }, function(prio_input)
+        if prio_input == nil then return end -- cancelled
+
+        local new_due = resolve_date(due_input)
+        local new_priority = (prio_input ~= "") and prio_input or nil
+
+        -- Read current line from source
+        local line_content, bufnr = read_task_line(task)
+        if not line_content then return end
+
+        local new_line = line_content
+        local desc_changed = new_desc ~= task.description
+
+        -- Update description in the line
+        if desc_changed then
+          local escaped_old = task.description:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+          new_line = new_line:gsub(escaped_old, new_desc, 1)
+        end
+
+        -- Update due date
+        if new_due ~= task.due then
+          if new_due then
+            if new_line:match("%[due::") then
+              new_line = new_line:gsub("%[due::%s*[^%]]+%]", "[due:: " .. new_due .. "]")
+            else
+              local insert_pos = new_line:find("%s+%[completion::")
+              if insert_pos then
+                new_line = new_line:sub(1, insert_pos - 1) .. "  [due:: " .. new_due .. "]" .. new_line:sub(insert_pos)
+              else
+                new_line = new_line .. "  [due:: " .. new_due .. "]"
+              end
+            end
+          else
+            new_line = new_line:gsub("%s*%[due::%s*[^%]]+%]", "")
+          end
+        end
+
+        -- Update priority
+        if new_priority ~= task.priority then
+          if new_priority then
+            if new_line:match("%[priority::") then
+              new_line = new_line:gsub("%[priority::%s*[^%]]+%]", "[priority:: " .. new_priority .. "]")
+            else
+              local insert_pos = new_line:find("%s+%[completion::")
+              if insert_pos then
+                new_line = new_line:sub(1, insert_pos - 1) .. "  [priority:: " .. new_priority .. "]" .. new_line:sub(insert_pos)
+              else
+                new_line = new_line .. "  [priority:: " .. new_priority .. "]"
+              end
+            end
+          else
+            new_line = new_line:gsub("%s*%[priority::%s*[^%]]+%]", "")
+          end
+        end
+
+        -- Handle linked note rename if description changed
+        if desc_changed and task.note_link then
+          local old_path = parser.resolve_note_path(task.note_link, config.vault_path)
+          local new_slug = slugify(new_desc)
+          local new_note_link = config.tasks_path .. "/" .. new_slug
+          local new_path = parser.resolve_note_path(new_note_link, config.vault_path)
+
+          if old_path ~= new_path and vim.fn.filereadable(old_path) == 1 then
+            vim.fn.mkdir(vim.fn.fnamemodify(new_path, ":h"), "p")
+            vim.fn.rename(old_path, new_path)
+
+            -- Update title in note file
+            local note_lines = vim.fn.readfile(new_path)
+            if #note_lines > 0 and note_lines[1]:match("^# ") then
+              note_lines[1] = "# " .. new_desc
+              vim.fn.writefile(note_lines, new_path)
+            end
+
+            -- Wipe old buffer
+            local old_bufnr = vim.fn.bufnr(old_path)
+            if old_bufnr ~= -1 then
+              vim.api.nvim_buf_delete(old_bufnr, { force = true })
+            end
+
+            -- Update wiki-link in the line
+            local escaped_old_link = task.note_link:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+            new_line = new_line:gsub("%[%[" .. escaped_old_link .. "%]%]", "[[" .. new_note_link .. "]]")
+            task.note_link = new_note_link
+          end
+        end
+
+        write_task_line(task, new_line, bufnr)
+        task.description = new_desc
+        task.due = new_due
+        task.priority = new_priority
+
+        if callback then callback() end
+      end)
+    end)
+  end)
+end
+
 --- Toggle the task on the current line in the current buffer
 function M.toggle_current_line()
   local line = vim.api.nvim_get_current_line()
@@ -225,19 +399,6 @@ function M.create_note_file(note_path, title)
   }
 
   vim.fn.writefile(template, note_path)
-end
-
---- Slugify a string for use as a filename
----@param str string
----@return string
-local function slugify(str)
-  local slug = str:lower()
-  slug = slug:gsub("[^%w%s-]", "") -- remove non-alphanumeric except spaces and hyphens
-  slug = slug:gsub("%s+", "-")     -- spaces to hyphens
-  slug = slug:gsub("%-+", "-")     -- collapse multiple hyphens
-  slug = slug:gsub("^%-+", "")     -- trim leading hyphens
-  slug = slug:gsub("%-+$", "")     -- trim trailing hyphens
-  return slug
 end
 
 --- Add a note link to an existing task (creates the note file and updates the task line)

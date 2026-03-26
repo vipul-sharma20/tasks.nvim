@@ -77,6 +77,20 @@ local function format_due_short(due)
   return months[tonumber(m)] .. " " .. tonumber(d)
 end
 
+local function get_priority_indicator(priority)
+  if not priority then return "", nil end
+  local map = {
+    highest = { "▲▲", "NTasksPrioHighest" },
+    high    = { "▲",  "NTasksPrioHigh" },
+    medium  = { "━",  "NTasksPrioMedium" },
+    low     = { "▼",  "NTasksPrioLow" },
+    lowest  = { "▼▼", "NTasksPrioLowest" },
+  }
+  local entry = map[priority]
+  if entry then return entry[1], entry[2] end
+  return "", nil
+end
+
 local function fuzzy_match(str, pattern)
   if not pattern or pattern == "" then return true end
   local lower_str = str:lower()
@@ -124,15 +138,29 @@ local function render_task_list(tasks, config, lines, highlights, task_line_map)
 
   for _, task in ipairs(tasks) do
     local symbol = get_symbol(task.status, config)
+    local prio_ind, prio_hl = get_priority_indicator(task.priority)
     local desc = task.description
     local note_indicator = task.note_link and " 📎" or ""
     local due_str = format_due_short(task.due)
 
+    -- Right side: "▲ Mar 24" or "Mar 24" or "▲" or ""
+    local right = ""
+    if prio_ind ~= "" and due_str ~= "" then
+      right = prio_ind .. " " .. due_str
+    elseif prio_ind ~= "" then
+      right = prio_ind
+    elseif due_str ~= "" then
+      right = due_str
+    end
+
+    -- Left side: "  ✗ Description 📎"
     local left = "  " .. symbol .. " " .. desc .. note_indicator
     local left_display_width = vim.fn.strdisplaywidth(left)
+    local right_display_width = vim.fn.strdisplaywidth(right)
 
-    if left_display_width > date_col - 2 then
-      local avail = date_col - 4 - vim.fn.strdisplaywidth("  " .. symbol .. " ") - vim.fn.strdisplaywidth(note_indicator)
+    -- Truncate description if needed
+    if left_display_width + right_display_width + 2 > date_col then
+      local avail = date_col - 4 - vim.fn.strdisplaywidth("  " .. symbol .. " ") - vim.fn.strdisplaywidth(note_indicator) - right_display_width
       if avail > 3 then
         desc = vim.fn.strcharpart(desc, 0, avail) .. "…"
       end
@@ -140,21 +168,32 @@ local function render_task_list(tasks, config, lines, highlights, task_line_map)
       left_display_width = vim.fn.strdisplaywidth(left)
     end
 
-    local pad = math.max(date_col - left_display_width - vim.fn.strdisplaywidth(due_str), 1)
-    local task_line = left .. string.rep(" ", pad) .. due_str
+    -- Pad to right-align the right side at date_col
+    local pad = math.max(date_col - left_display_width - right_display_width, 1)
+    local task_line = left .. string.rep(" ", pad) .. right
 
     table.insert(lines, task_line)
     local ln = #lines
     task_line_map[ln] = task
 
+    -- Highlights (byte offsets)
     local sym_byte_end = #("  " .. symbol)
     table.insert(highlights, { ln, 2, sym_byte_end, get_symbol_highlight(task.status) })
+
     local desc_byte_start = sym_byte_end + 1
     local desc_byte_end = desc_byte_start + #desc
     table.insert(highlights, { ln, desc_byte_start, desc_byte_end, get_task_highlight(task) })
-    if due_str ~= "" then
-      local due_byte_start = #task_line - #due_str
-      table.insert(highlights, { ln, due_byte_start, #task_line, get_due_highlight(task) })
+
+    -- Right side highlights
+    if right ~= "" then
+      local right_byte_start = #task_line - #right
+      if prio_ind ~= "" and prio_hl then
+        table.insert(highlights, { ln, right_byte_start, right_byte_start + #prio_ind, prio_hl })
+      end
+      if due_str ~= "" then
+        local due_byte_start = #task_line - #due_str
+        table.insert(highlights, { ln, due_byte_start, #task_line, get_due_highlight(task) })
+      end
     end
   end
 end
@@ -216,7 +255,7 @@ function M.render(config, all_tasks, filter_text)
   local undo_redo = ""
   if #undo_stack > 0 then undo_redo = undo_redo .. " u:undo" end
   if #redo_stack > 0 then undo_redo = undo_redo .. " C-r:redo" end
-  local help = "  x:done p:prog -:cancel ␣:todo d:due /:search ⏎:context o:src n:new r:refresh" .. undo_redo .. " q:close"
+  local help = "  x:done p:prog -:cancel ␣:todo e:edit /:search ⏎:context o:src n:new" .. undo_redo .. " q:close"
   table.insert(lines, help)
   table.insert(highlights, { #lines, 0, #help, "NTasksHelp" })
 
@@ -639,11 +678,11 @@ function M.open(config, custom_query)
   vim.keymap.set("n", "p", function() M.set_status("/") end, opts)
   vim.keymap.set("n", "-", function() M.set_status("-") end, opts)
   vim.keymap.set("n", "<Space>", function() M.set_status(" ") end, opts)
-  vim.keymap.set("n", "d", function()
+  vim.keymap.set("n", "e", function()
     local line = vim.api.nvim_win_get_cursor(state.win)[1]
     local task = state.tasks_by_line[line]
     if not is_task_line(task) then return end
-    require("tasks.actions").prompt_due_date(task, function()
+    require("tasks.actions").edit_task(task, config, function()
       state.all_tasks = scanner.scan_deduped(state.config.vault_path)
       redraw_dashboard()
     end)
