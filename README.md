@@ -2,7 +2,8 @@
 
 Markdown-native task management for Neovim.
 
-Works alongside Obsidian, vimwiki like note-taking system.
+Works alongside Obsidian, vimwiki like note-taking system. Complete feature
+list [here](#features).
 
 > [!NOTE]
 > There are already loads of task management tools available. This note-taking
@@ -214,6 +215,22 @@ t = {
 | `[completion:: DATE]` | No | Auto-added when marking done/cancelled |
 
 Date input accepts: `2026-03-25`, `today`, `tomorrow`, `tmr`, `+3d`, `+7d`, `next week`.
+
+## Features
+
+- Floating dashboard (:Tasks) with configurable sections — P0 (overdue), P1 (due today), all pending, recently done
+- Inline task status toggle — <C-Space> cycles [ ] → [/] → [x] → [-] on #task lines
+- Task context via wiki-links — [[tasks/slug]] links to note files, viewable and editable inline in the dashboard float
+- fzf-style search bar — / in dashboard for live fuzzy filtering across descriptions, dates, tags
+- Full task editing — e to edit description, due date, and priority in one flow; renames linked note files automatically
+- Status management — x/p/-/<Space> to mark done/in-progress/cancelled/todo with undo (u) and redo (<C-r>)
+- Priority indicators — ▲▲ ▲ ━ ▼ ▼▼ rendered inline in the dashboard with color coding
+- Collapsible sections — <Tab> to expand/collapse (recently done section collapsed by default)
+- Natural date input — accepts today, tomorrow, +3d, next week when setting due dates
+- Telescope picker — :TaskFind for fuzzy search across all tasks in the vault
+- Query block evaluation — :TaskQuery evaluates ```tasks blocks from your markdown files
+- Inline #task pill — rendered as a styled capsule in markdown/vimwiki buffers
+- :w / :wq / :q work naturally in the floating window note view
 
 ## License
 
