@@ -56,11 +56,16 @@ buffer.
 | `p` | Mark in-progress |
 | `-` | Mark cancelled |
 | `<Space>` | Mark todo |
-| `d` | Set/change due date |
+| `e` | Edit task (description, due date, priority) |
 | `<CR>` | Open note context inline (creates note + wiki-link if none exists) |
 | `o` | Jump to source file at the task line |
 | `n` | Create new task |
 | `/` | Fuzzy search (fzf-style bar, filters live as you type) |
+| `l` | Filter by label (telescope picker) |
+| `L` | Clear label filter |
+| `u` | Undo last status change |
+| `<C-r>` | Redo |
+| `<Tab>` | Expand/collapse section |
 | `r` | Refresh |
 | `q` / `:q` | Close |
 
@@ -83,6 +88,32 @@ Press `/` in the dashboard. A search bar appears above the float. Type to
 fuzzy-filter across task descriptions, dates, priorities, and tags. `<CR>` or
 `<Esc>` accepts the filter and drops you back into the filtered list. `<C-c>`
 clears the filter. `<Esc>` in the dashboard clears an active filter.
+
+## Labels
+
+Tag tasks with `#projectname` to group them by project:
+
+```markdown
+- [ ] #task #api-team Deploy API service  [due:: 2026-03-28]
+- [ ] #task #otel Estimate timelines for OTel migration
+```
+
+Press `l` in the dashboard to open the label picker (telescope-powered,
+searchable). Select a label to filter and the dashboard switches to a
+status-grouped view showing all tasks for that project: In Progress, Todo, and
+Done.
+
+![Labels](assets/labels.png)
+
+Press `L` to clear the filter and return to the default urgency view.
+
+## Inline rendering
+
+`#task` and `#label` tags are highlighted in the buffers in normal mode.
+
+![Task highlighting](assets/task-highlighting.png)
+
+Highlights clear in insert mode so you see the raw markdown while editing.
 
 ## Inline toggle
 
@@ -229,7 +260,8 @@ Date input accepts: `2026-03-25`, `today`, `tomorrow`, `tmr`, `+3d`, `+7d`, `nex
 - Natural date input — accepts today, tomorrow, +3d, next week when setting due dates
 - Telescope picker — :TaskFind for fuzzy search across all tasks in the vault
 - Query block evaluation — :TaskQuery evaluates ```tasks blocks from your markdown files
-- Inline #task pill — rendered as a styled capsule in markdown/vimwiki buffers
+- Labels — tag tasks with #project, filter dashboard by label via telescope picker, status-grouped view
+- Inline highlighting — #task and #label tags rendered as colored pills in markdown buffers, motions unaffected
 - :w / :wq / :q work naturally in the floating window note view
 
 ## License
