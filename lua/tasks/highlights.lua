@@ -71,6 +71,12 @@ function M.setup()
 
   -- Count line
   vim.api.nvim_set_hl(0, "NTasksCount", { fg = colors.overlay0, italic = true })
+
+  -- Inline pills (rendered in markdown/vimwiki buffers)
+  vim.api.nvim_set_hl(0, "NTasksTagPill", { fg = colors.surface0, bg = colors.mauve, bold = true })
+  vim.api.nvim_set_hl(0, "NTasksLabelPill", { fg = colors.surface0, bg = colors.blue })
+  vim.api.nvim_set_hl(0, "NTasksLabelInline", { fg = colors.blue, italic = true })
+  vim.api.nvim_set_hl(0, "NTasksLinkPill", { fg = colors.blue, bg = colors.surface0, italic = true })
 end
 
 return M
