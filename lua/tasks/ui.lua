@@ -14,6 +14,7 @@ local state = {
   config = nil,
   custom_query = nil,
   filter_text = nil,
+  label_filter = nil, -- active label/tag filter
   expanded_sections = {}, -- tracks which collapsed sections are expanded
   -- note view state
   note_path = nil,
@@ -120,6 +121,36 @@ local function filter_tasks(tasks, filter)
   return result
 end
 
+local function filter_by_label(tasks, label)
+  if not label then return tasks end
+  local result = {}
+  for _, task in ipairs(tasks) do
+    for _, tag in ipairs(task.tags) do
+      if tag == label then
+        table.insert(result, task)
+        break
+      end
+    end
+  end
+  return result
+end
+
+--- Collect all unique labels (tags other than "task") from a task list
+local function collect_labels(tasks)
+  local seen = {}
+  local labels = {}
+  for _, task in ipairs(tasks) do
+    for _, tag in ipairs(task.tags) do
+      if tag ~= "task" and not seen[tag] then
+        seen[tag] = true
+        table.insert(labels, tag)
+      end
+    end
+  end
+  table.sort(labels)
+  return labels
+end
+
 --- Check if a tasks_by_line entry is a real task (not a section header)
 local function is_task_line(entry)
   return entry and not entry._section_index
@@ -143,15 +174,21 @@ local function render_task_list(tasks, config, lines, highlights, task_line_map)
     local note_indicator = task.note_link and " 📎" or ""
     local due_str = format_due_short(task.due)
 
-    -- Right side: "▲ Mar 24" or "Mar 24" or "▲" or ""
-    local right = ""
-    if prio_ind ~= "" and due_str ~= "" then
-      right = prio_ind .. " " .. due_str
-    elseif prio_ind ~= "" then
-      right = prio_ind
-    elseif due_str ~= "" then
-      right = due_str
+    -- Collect labels (tags other than "task")
+    local label_parts = {}
+    for _, tag in ipairs(task.tags) do
+      if tag ~= "task" then
+        table.insert(label_parts, "#" .. tag)
+      end
     end
+    local labels_str = #label_parts > 0 and table.concat(label_parts, " ") or ""
+
+    -- Right side: "#label ▲ Mar 24" — labels first, then priority, then date
+    local right_parts = {}
+    if labels_str ~= "" then table.insert(right_parts, labels_str) end
+    if prio_ind ~= "" then table.insert(right_parts, prio_ind) end
+    if due_str ~= "" then table.insert(right_parts, due_str) end
+    local right = table.concat(right_parts, " ")
 
     -- Left side: "  ✗ Description 📎"
     local left = "  " .. symbol .. " " .. desc .. note_indicator
@@ -168,7 +205,7 @@ local function render_task_list(tasks, config, lines, highlights, task_line_map)
       left_display_width = vim.fn.strdisplaywidth(left)
     end
 
-    -- Pad to right-align the right side at date_col
+    -- Pad to right-align
     local pad = math.max(date_col - left_display_width - right_display_width, 1)
     local task_line = left .. string.rep(" ", pad) .. right
 
@@ -184,12 +221,24 @@ local function render_task_list(tasks, config, lines, highlights, task_line_map)
     local desc_byte_end = desc_byte_start + #desc
     table.insert(highlights, { ln, desc_byte_start, desc_byte_end, get_task_highlight(task) })
 
-    -- Right side highlights
+    -- Right side highlights: labels, then priority, then date
     if right ~= "" then
       local right_byte_start = #task_line - #right
-      if prio_ind ~= "" and prio_hl then
-        table.insert(highlights, { ln, right_byte_start, right_byte_start + #prio_ind, prio_hl })
+      local cursor = right_byte_start
+
+      -- Label highlights
+      for _, lbl in ipairs(label_parts) do
+        table.insert(highlights, { ln, cursor, cursor + #lbl, "NTasksLabelInline" })
+        cursor = cursor + #lbl + 1 -- +1 for space
       end
+
+      -- Priority highlight
+      if prio_ind ~= "" and prio_hl then
+        table.insert(highlights, { ln, cursor, cursor + #prio_ind, prio_hl })
+        cursor = cursor + #prio_ind + 1
+      end
+
+      -- Due date highlight
       if due_str ~= "" then
         local due_byte_start = #task_line - #due_str
         table.insert(highlights, { ln, due_byte_start, #task_line, get_due_highlight(task) })
@@ -203,20 +252,48 @@ function M.render(config, all_tasks, filter_text)
   local highlights = {}
   local task_line_map = {}
 
-  local title = "  Tasks"
+  local label = state.label_filter
+  local title = label and ("  Tasks  #" .. label) or "  Tasks"
   local date_str = os.date("%Y-%m-%d")
   local right_side = date_str .. "  "
-  local padding = config._inner_width - #title - #right_side
+  local padding = config._inner_width - vim.fn.strdisplaywidth(title) - #right_side
   if padding < 1 then padding = 1 end
   table.insert(lines, title .. string.rep(" ", padding) .. right_side)
-  table.insert(highlights, { #lines, 0, #title, "NTasksTitle" })
+  table.insert(highlights, { #lines, 0, 7, "NTasksTitle" }) -- "  Tasks"
+  if label then
+    table.insert(highlights, { #lines, 9, 9 + #label + 1, "NTasksTagPill" })
+  end
 
   table.insert(lines, "  " .. string.rep("─", config._inner_width - 4) .. "  ")
   table.insert(highlights, { #lines, 0, #lines[#lines], "NTasksBorder" })
   table.insert(lines, "")
 
-  for si, section in ipairs(config.sections) do
+  -- When a label is active, show status-grouped sections instead of urgency sections
+  local effective_sections = config.sections
+  if state.label_filter then
+    effective_sections = {
+      { name = "In Progress", query = "not done\nsort by due", _status_filter = "/" },
+      { name = "Todo", query = "not done\nsort by due", _status_filter = " " },
+      { name = "Done", query = "done\nsort by due", collapsed = true },
+    }
+  end
+
+  for si, section in ipairs(effective_sections) do
     local filtered = query.evaluate(section.query, all_tasks)
+    filtered = filter_by_label(filtered, state.label_filter)
+
+    -- Apply status sub-filter for label view
+    if section._status_filter then
+      local sf = section._status_filter
+      local status_filtered = {}
+      for _, t in ipairs(filtered) do
+        if t.status == sf then
+          table.insert(status_filtered, t)
+        end
+      end
+      filtered = status_filtered
+    end
+
     filtered = filter_tasks(filtered, filter_text)
 
     local is_collapsed = section.collapsed and not state.expanded_sections[si]
@@ -255,7 +332,8 @@ function M.render(config, all_tasks, filter_text)
   local undo_redo = ""
   if #undo_stack > 0 then undo_redo = undo_redo .. " u:undo" end
   if #redo_stack > 0 then undo_redo = undo_redo .. " C-r:redo" end
-  local help = "  x:done p:prog -:cancel ␣:todo e:edit /:search ⏎:context o:src n:new" .. undo_redo .. " q:close"
+  local label_hint = state.label_filter and " L:clear" or " l:label"
+  local help = "  x:done p:prog -:cancel ␣:todo e:edit /:search" .. label_hint .. " ⏎:context o:src n:new" .. undo_redo .. " q:close"
   table.insert(lines, help)
   table.insert(highlights, { #lines, 0, #help, "NTasksHelp" })
 
@@ -396,6 +474,11 @@ end
 
 -- ── search bar ───────────────────────────────────────────────────────
 
+-- ── label picker ─────────────────────────────────────────────────────
+-- (show_label_picker defined after redraw_dashboard to avoid forward-reference)
+
+-- ── search bar ───────────────────────────────────────────────────────
+
 function M.close_search()
   if state.search_win and vim.api.nvim_win_is_valid(state.search_win) then
     vim.api.nvim_win_close(state.search_win, true)
@@ -439,6 +522,81 @@ local function redraw_dashboard()
   end
 
   state.tasks_by_line = task_line_map
+end
+
+--- Label picker: floating buffer above the dashboard listing all tags
+function M.show_label_picker()
+  local ok, _ = pcall(require, "telescope")
+  if not ok then
+    vim.notify("tasks: telescope.nvim required for label picker", vim.log.levels.ERROR)
+    return
+  end
+
+  local pickers = require("telescope.pickers")
+  local finders = require("telescope.finders")
+  local conf = require("telescope.config").values
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+
+  local labels = collect_labels(state.all_tasks)
+  if #labels == 0 then
+    vim.notify("tasks: no labels found", vim.log.levels.INFO)
+    return
+  end
+
+  -- Build entries with counts
+  local entries = {}
+  for _, label in ipairs(labels) do
+    local count = 0
+    for _, task in ipairs(state.all_tasks) do
+      for _, t in ipairs(task.tags) do
+        if t == label then count = count + 1; break end
+      end
+    end
+    local active = state.label_filter == label
+    table.insert(entries, { label = label, count = count, active = active })
+  end
+
+  pickers.new({}, {
+    prompt_title = "Labels",
+    finder = finders.new_table({
+      results = entries,
+      entry_maker = function(entry)
+        local marker = entry.active and " ● " or "   "
+        local display = marker .. "#" .. entry.label .. "  (" .. entry.count .. ")"
+        return {
+          value = entry,
+          display = display,
+          ordinal = entry.label,
+        }
+      end,
+    }),
+    sorter = conf.generic_sorter({}),
+    previewer = false,
+    layout_config = {
+      width = 0.3,
+      height = 0.4,
+    },
+    attach_mappings = function(prompt_bufnr)
+      actions.select_default:replace(function()
+        actions.close(prompt_bufnr)
+        local selection = action_state.get_selected_entry()
+        if selection then
+          local label = selection.value.label
+          if state.label_filter == label then
+            state.label_filter = nil
+          else
+            state.label_filter = label
+          end
+          redraw_dashboard()
+          if state.win and vim.api.nvim_win_is_valid(state.win) then
+            vim.api.nvim_set_current_win(state.win)
+          end
+        end
+      end)
+      return true
+    end,
+  }):find()
 end
 
 local function accept_search_and_focus_dashboard()
@@ -691,6 +849,22 @@ function M.open(config, custom_query)
   vim.keymap.set("n", "n", function() require("tasks.actions").create_task(config) end, opts)
   vim.keymap.set("n", "/", function() M.start_search() end, opts)
 
+  -- l: show label picker, L: clear label filter
+  vim.keymap.set("n", "l", function()
+    if state.label_filter then
+      -- Already filtered, 'l' opens picker to switch
+      M.show_label_picker()
+    else
+      M.show_label_picker()
+    end
+  end, opts)
+  vim.keymap.set("n", "L", function()
+    if state.label_filter then
+      state.label_filter = nil
+      redraw_dashboard()
+    end
+  end, opts)
+
   -- Place cursor on first task line (not section headers)
   vim.schedule(function()
     local total = vim.api.nvim_buf_line_count(buf)
@@ -778,6 +952,7 @@ function M.close()
   state.tasks_by_line = {}
   state.all_tasks = {}
   state.filter_text = nil
+  state.label_filter = nil
   state.custom_query = nil
 end
 

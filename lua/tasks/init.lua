@@ -68,6 +68,7 @@ function M.setup(opts)
     pattern = { "vimwiki", "markdown" },
     callback = function(ev)
       set_toggle_maps(ev.buf)
+      require("tasks.render").attach(ev.buf)
     end,
   })
 
@@ -77,6 +78,7 @@ function M.setup(opts)
       local ft = vim.bo[buf].filetype
       if ft == "vimwiki" or ft == "markdown" then
         set_toggle_maps(buf)
+        require("tasks.render").attach(buf)
       end
     end
   end
