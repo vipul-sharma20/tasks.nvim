@@ -5,6 +5,17 @@ Markdown-native task management for Neovim.
 Works alongside Obsidian, vimwiki like note-taking system. Complete feature
 list [here](#features).
 
+Tasks belong in the files where the work is documented like diary entries,
+project notes, meeting logs. Not in a separate database, not in a plugin's
+internal format.
+
+tasks.nvim treats the markdown as the source of truth and builds a queryable
+dashboard on top of it with ripgrep. There's no import step, no migration, no
+schema. A task is just a checkbox with #task on it. Everything else, due dates,
+priorities, labels, linked notes is optional metadata on the same line. The
+plugin is a view layer, not a data layer. Your vault stays yours: plain text,
+diffable, portable, readable without any plugin installed.
+
 > [!NOTE]
 > There are already loads of task management tools available. This note-taking
 > setup is mostly tailored for ease of my personal workflow and to solve
