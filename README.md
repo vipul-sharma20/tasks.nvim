@@ -21,6 +21,15 @@ metadata on the same line. The plugin is a view layer, not a data layer.
 > Creating this repository in case people find any utility in this way of
 > note-taking.
 
+## Documentation
+
+See [installation instructions](#install) in this doc below. For plugin usage
+doc, install the plugin and run the help command like below.
+
+```
+:help tasks.nvim
+```
+
 ## How it works
 
 Tasks are markdown checkboxes with a `#task` tag and optional metadata:
@@ -163,26 +172,15 @@ Optional:
 
 ## Install
 
-With packer:
+Using Neovim's built-in plugin manager, `vim.pack` (requires a Neovim build
+that includes it):
 
 ```lua
-use {
-    'vipul-sharma20/tasks.nvim',
-    config = function()
-        require("tasks").setup()
-    end
-}
-```
+vim.pack.add({
+    { src = "https://github.com/vipul-sharma20/tasks.nvim" },
+})
 
-With lazy.nvim:
-
-```lua
-{
-    'vipul-sharma20/tasks.nvim',
-    config = function()
-        require("tasks").setup()
-    end
-}
+require("tasks").setup()
 ```
 
 ## Setup
