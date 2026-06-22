@@ -188,11 +188,13 @@ Date input~
     Wherever a due date is prompted (e.g. |:TaskCreate|, `e` in the
     dashboard), these inputs are accepted and resolved to `YYYY-MM-DD`:
 
-      2026-03-25     an explicit ISO date
-      today          tomorrow
-      tmr / tmrw     yesterday
-      next week      (= +7 days)
-      +Nd / +N       N days from now (e.g. `+3d`, `+7`)
+      YYYY-MM-DD     explicit ISO date (e.g. 2026-03-25)
+      today          the current date
+      tomorrow       +1 day
+      tmr, tmrw      +1 day (aliases of tomorrow)
+      yesterday      -1 day
+      next week      +7 days
+      +Nd, +N        N days from now (e.g. `+3d`, `+7`)
 
     An empty input clears the due date.
 
