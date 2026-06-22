@@ -846,7 +846,15 @@ function M.open(config, custom_query)
     end)
   end, opts)
   vim.keymap.set("n", "r", function() M.refresh() end, opts)
-  vim.keymap.set("n", "n", function() require("tasks.actions").create_task(config) end, opts)
+  vim.keymap.set("n", "n", function()
+    require("tasks.actions").create_task(config, function()
+      state.all_tasks = scanner.scan_deduped(config.vault_path)
+      redraw_dashboard()
+      if state.win and vim.api.nvim_win_is_valid(state.win) then
+        vim.api.nvim_set_current_win(state.win)
+      end
+    end)
+  end, opts)
   vim.keymap.set("n", "/", function() M.start_search() end, opts)
 
   -- l: show label picker, L: clear label filter

@@ -62,7 +62,10 @@ end
 ---@param vault_path string the vault root path
 ---@return string absolute path to the note file
 function M.resolve_note_path(note_link, vault_path)
-  vault_path = vim.fn.expand(vault_path)
+  vault_path = vim.fn.expand(vault_path):gsub("/+$", "")
+  -- Links may be vault-root-absolute ("/tasks/slug") or relative ("tasks/slug");
+  -- strip any leading slash so the join doesn't produce a doubled separator.
+  note_link = note_link:gsub("^/+", "")
   -- Add .md extension if not present
   if not note_link:match("%.md$") then
     note_link = note_link .. ".md"

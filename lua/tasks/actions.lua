@@ -263,98 +263,101 @@ function M.edit_task(task, config, callback)
       }, function(prio_input)
         if prio_input == nil then return end -- cancelled
 
-        local new_due = resolve_date(due_input)
-        local new_priority = (prio_input ~= "") and prio_input or nil
-
-        -- Read current line from source
-        local line_content, bufnr = read_task_line(task)
-        if not line_content then return end
-
-        local new_line = line_content
-        local desc_changed = new_desc ~= task.description
-
-        -- Update description in the line
-        if desc_changed then
-          local escaped_old = task.description:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-          new_line = new_line:gsub(escaped_old, new_desc, 1)
-        end
-
-        -- Update due date
-        if new_due ~= task.due then
-          if new_due then
-            if new_line:match("%[due::") then
-              new_line = new_line:gsub("%[due::%s*[^%]]+%]", "[due:: " .. new_due .. "]")
-            else
-              local insert_pos = new_line:find("%s+%[completion::")
-              if insert_pos then
-                new_line = new_line:sub(1, insert_pos - 1) .. "  [due:: " .. new_due .. "]" .. new_line:sub(insert_pos)
-              else
-                new_line = new_line .. "  [due:: " .. new_due .. "]"
-              end
-            end
-          else
-            new_line = new_line:gsub("%s*%[due::%s*[^%]]+%]", "")
-          end
-        end
-
-        -- Update priority
-        if new_priority ~= task.priority then
-          if new_priority then
-            if new_line:match("%[priority::") then
-              new_line = new_line:gsub("%[priority::%s*[^%]]+%]", "[priority:: " .. new_priority .. "]")
-            else
-              local insert_pos = new_line:find("%s+%[completion::")
-              if insert_pos then
-                new_line = new_line:sub(1, insert_pos - 1) .. "  [priority:: " .. new_priority .. "]" .. new_line:sub(insert_pos)
-              else
-                new_line = new_line .. "  [priority:: " .. new_priority .. "]"
-              end
-            end
-          else
-            new_line = new_line:gsub("%s*%[priority::%s*[^%]]+%]", "")
-          end
-        end
-
-        -- Handle linked note rename if description changed
-        if desc_changed and task.note_link then
-          local old_path = parser.resolve_note_path(task.note_link, config.vault_path)
-          local new_slug = slugify(new_desc)
-          local new_note_link = config.tasks_path .. "/" .. new_slug
-          local new_path = parser.resolve_note_path(new_note_link, config.vault_path)
-
-          if old_path ~= new_path and vim.fn.filereadable(old_path) == 1 then
-            vim.fn.mkdir(vim.fn.fnamemodify(new_path, ":h"), "p")
-            vim.fn.rename(old_path, new_path)
-
-            -- Update title in note file
-            local note_lines = vim.fn.readfile(new_path)
-            if #note_lines > 0 and note_lines[1]:match("^# ") then
-              note_lines[1] = "# " .. new_desc
-              vim.fn.writefile(note_lines, new_path)
-            end
-
-            -- Wipe old buffer
-            local old_bufnr = vim.fn.bufnr(old_path)
-            if old_bufnr ~= -1 then
-              vim.api.nvim_buf_delete(old_bufnr, { force = true })
-            end
-
-            -- Update wiki-link in the line
-            local escaped_old_link = task.note_link:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-            new_line = new_line:gsub("%[%[" .. escaped_old_link .. "%]%]", "[[" .. new_note_link .. "]]")
-            task.note_link = new_note_link
-          end
-        end
-
-        write_task_line(task, new_line, bufnr)
-        task.description = new_desc
-        task.due = new_due
-        task.priority = new_priority
-
+        M.apply_task_edit(task, config, new_desc, due_input, prio_input)
         if callback then callback() end
       end)
     end)
   end)
+end
+
+--- Apply edits to a task from already-collected input values.
+---@param task table parsed task
+---@param config table plugin config
+---@param new_desc string new description
+---@param due_input string raw due input
+---@param prio_input string raw priority input
+function M.apply_task_edit(task, config, new_desc, due_input, prio_input)
+  local new_due = resolve_date(due_input)
+  local new_priority = (prio_input ~= "") and prio_input or nil
+
+  local line_content, bufnr = read_task_line(task)
+  if not line_content then return end
+
+  local new_line = line_content
+  local desc_changed = new_desc ~= task.description
+
+  if desc_changed then
+    local escaped_old = task.description:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+    -- Escape % in the replacement so descriptions containing % don't break gsub.
+    local escaped_new = new_desc:gsub("%%", "%%%%")
+    new_line = new_line:gsub(escaped_old, escaped_new, 1)
+  end
+
+  if new_due ~= task.due then
+    if new_due then
+      if new_line:match("%[due::") then
+        new_line = new_line:gsub("%[due::%s*[^%]]+%]", "[due:: " .. new_due .. "]")
+      else
+        local insert_pos = new_line:find("%s+%[completion::")
+        if insert_pos then
+          new_line = new_line:sub(1, insert_pos - 1) .. "  [due:: " .. new_due .. "]" .. new_line:sub(insert_pos)
+        else
+          new_line = new_line .. "  [due:: " .. new_due .. "]"
+        end
+      end
+    else
+      new_line = new_line:gsub("%s*%[due::%s*[^%]]+%]", "")
+    end
+  end
+
+  if new_priority ~= task.priority then
+    if new_priority then
+      if new_line:match("%[priority::") then
+        new_line = new_line:gsub("%[priority::%s*[^%]]+%]", "[priority:: " .. new_priority .. "]")
+      else
+        local insert_pos = new_line:find("%s+%[completion::")
+        if insert_pos then
+          new_line = new_line:sub(1, insert_pos - 1) .. "  [priority:: " .. new_priority .. "]" .. new_line:sub(insert_pos)
+        else
+          new_line = new_line .. "  [priority:: " .. new_priority .. "]"
+        end
+      end
+    else
+      new_line = new_line:gsub("%s*%[priority::%s*[^%]]+%]", "")
+    end
+  end
+
+  if desc_changed and task.note_link then
+    local old_path = parser.resolve_note_path(task.note_link, config.vault_path)
+    local new_slug = slugify(new_desc)
+    local new_note_link = "/" .. config.tasks_path .. "/" .. new_slug
+    local new_path = parser.resolve_note_path(new_note_link, config.vault_path)
+
+    if old_path ~= new_path and vim.fn.filereadable(old_path) == 1 then
+      vim.fn.mkdir(vim.fn.fnamemodify(new_path, ":h"), "p")
+      vim.fn.rename(old_path, new_path)
+
+      local note_lines = vim.fn.readfile(new_path)
+      if #note_lines > 0 and note_lines[1]:match("^# ") then
+        note_lines[1] = "# " .. new_desc
+        vim.fn.writefile(note_lines, new_path)
+      end
+
+      local old_bufnr = vim.fn.bufnr(old_path)
+      if old_bufnr ~= -1 then
+        vim.api.nvim_buf_delete(old_bufnr, { force = true })
+      end
+
+      local escaped_old_link = task.note_link:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+      new_line = new_line:gsub("%[%[" .. escaped_old_link .. "%]%]", "[[" .. new_note_link .. "]]")
+      task.note_link = new_note_link
+    end
+  end
+
+  write_task_line(task, new_line, bufnr)
+  task.description = new_desc
+  task.due = new_due
+  task.priority = new_priority
 end
 
 --- Toggle the task on the current line in the current buffer
@@ -412,7 +415,7 @@ function M.add_note_to_task(task, config)
 
   -- Generate note path from task description
   local slug = slugify(task.description)
-  local note_link = config.tasks_path .. "/" .. slug
+  local note_link = "/" .. config.tasks_path .. "/" .. slug
   local note_path = parser.resolve_note_path(note_link, config.vault_path)
 
   -- Create the note file
@@ -480,7 +483,8 @@ end
 
 --- Create a new task interactively
 ---@param config table plugin config
-function M.create_task(config)
+---@param callback function|nil called after task is created (for dashboard refresh)
+function M.create_task(config, callback)
   vim.ui.input({ prompt = "Task description: " }, function(desc)
     if not desc or desc == "" then
       return
@@ -494,7 +498,7 @@ function M.create_task(config)
           local note_link = nil
           if create_note == "y" then
             local slug = slugify(desc)
-            note_link = config.tasks_path .. "/" .. slug
+            note_link = "/" .. config.tasks_path .. "/" .. slug
             local note_path = parser.resolve_note_path(note_link, config.vault_path)
             M.create_note_file(note_path, desc)
           end
@@ -530,7 +534,7 @@ function M.create_task(config)
 
           vim.notify("tasks: task created in " .. today .. ".md", vim.log.levels.INFO)
 
-          -- Reload the buffer if it's open
+          -- Reload the diary buffer if it's open
           local bufnr = vim.fn.bufnr(diary_file)
           if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
             vim.api.nvim_buf_call(bufnr, function()
@@ -538,16 +542,20 @@ function M.create_task(config)
             end)
           end
 
-          -- Refresh dashboard if open
-          local ui = require("tasks.ui")
-          if ui then
-            pcall(ui.refresh)
-          end
+          if callback then
+            callback()
+          else
+            -- Refresh dashboard if open (standalone :TaskCreate)
+            local ui = require("tasks.ui")
+            if ui then
+              pcall(ui.refresh)
+            end
 
-          -- If note was created, open it
-          if note_link then
-            local note_path = parser.resolve_note_path(note_link, config.vault_path)
-            vim.cmd("edit " .. vim.fn.fnameescape(note_path))
+            -- If note was created, open it
+            if note_link then
+              local note_path = parser.resolve_note_path(note_link, config.vault_path)
+              vim.cmd("edit " .. vim.fn.fnameescape(note_path))
+            end
           end
         end)
       end)
