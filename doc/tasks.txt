@@ -1,4 +1,4 @@
-*tasks.txt*          Markdown-native task management for Neovim
+*tasks.txt*  *tasks.nvim*  Markdown-native task management for Neovim
 
 
                _            _                     _ ~
