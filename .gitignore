@@ -1,0 +1,8 @@
+# Generated helptags index — plugin managers regenerate this on install/update
+doc/tags
+
+# macOS
+.DS_Store
+
+# Swift build artifacts (macos/ menu-bar app)
+macos/.build/
