@@ -1,0 +1,421 @@
+*tasks.txt*          Markdown-native task management for Neovim
+
+
+               _            _                     _ ~
+              | |_ __ _ ___| | _____   _ ____   _(_)_ __ ___ ~
+              | __/ _` / __| |/ / __| | '_ \ \ / / | '_ ` _ \ ~
+              | || (_| \__ \   <\__ \_| | | \ V /| | | | | | | ~
+               \__\__,_|___/_|\_\___(_)_| |_|\_/ |_|_| |_| |_| ~
+
+
+Markdown-native task management for Neovim. Works alongside Obsidian / vimwiki
+style note-taking.
+
+tasks.nvim treats the markdown as the source of truth and builds a queryable
+dashboard on top of it with ripgrep. A task is just a checkbox with `#task` on
+it; everything else is optional metadata on the same line. The plugin is a
+view layer, not a data layer.
+
+See |tasks-introduction| for the overview, or |tasks-contents| to jump
+anywhere.
+
+==============================================================================
+CONTENTS                                                       *tasks-contents*
+
+  1. Introduction .......................... |tasks-introduction|
+  2. Requirements .......................... |tasks-requirements|
+  3. Installation .......................... |tasks-installation|
+  4. Setup / Configuration ................. |tasks-setup|
+  5. Task format ........................... |tasks-format|
+  6. Commands .............................. |tasks-commands|
+  7. The dashboard ......................... |tasks-dashboard|
+  8. Dashboard keymaps ..................... |tasks-dashboard-keymaps|
+  9. Note view ............................. |tasks-note-view|
+ 10. Search ................................ |tasks-search|
+ 11. Labels ................................ |tasks-labels|
+ 12. Inline rendering & toggle ............. |tasks-inline|
+ 13. Query blocks .......................... |tasks-query|
+ 14. Highlight groups ...................... |tasks-highlights|
+ 15. License ............................... |tasks-license|
+
+==============================================================================
+1. INTRODUCTION                                            *tasks-introduction*
+
+Markdown-native task management for Neovim that works alongside Obsidian /
+vimwiki style note-taking.
+
+Tasks belong in the markdown files where the work is documented — diary
+entries, project notes, meeting logs — not in a separate database.
+
+tasks.nvim treats the markdown as the source of truth and builds a queryable
+dashboard on top of it with ripgrep. A task is just a checkbox with `#task` on
+it. Other metadata — due dates, priorities, labels, linked notes — is
+optional, on the same line. The plugin is a view layer, not a data layer.
+
+See |tasks-format| for the full task syntax.
+
+==============================================================================
+2. REQUIREMENTS                                            *tasks-requirements*
+
+Required:~
+  - Neovim 0.9+
+  - ripgrep (rg), used for scanning the vault.
+    https://github.com/BurntSushi/ripgrep
+
+Optional:~
+  - telescope.nvim, for |:TaskFind| and the label picker (|tasks-labels|).
+    https://github.com/nvim-telescope/telescope.nvim
+  - catppuccin (mocha) — if present, dashboard highlights pull from its
+    palette. Otherwise sensible built-in defaults are used. See
+    |tasks-highlights|.
+
+==============================================================================
+3. INSTALLATION                                            *tasks-installation*
+
+With packer.nvim: >lua
+    use {
+      'vipul-sharma20/tasks.nvim',
+      config = function()
+        require("tasks").setup()
+      end,
+    }
+<
+With lazy.nvim: >lua
+    {
+      'vipul-sharma20/tasks.nvim',
+      config = function()
+        require("tasks").setup()
+      end,
+    }
+<
+Calling |tasks.setup()| is required: it registers the commands, the inline
+highlights, and the `<C-Space>` toggle mapping for markdown/vimwiki buffers.
+
+==============================================================================
+4. SETUP / CONFIGURATION                                          *tasks-setup*
+
+                                                                *tasks.setup()*
+require("tasks").setup({opts})
+
+    Initialize the plugin. All fields are optional; defaults are shown below.
+
+Full default configuration: >lua
+    require("tasks").setup({
+      vault_path = "~/tools/noto",        -- root of your markdown vault
+      diary_path = "~/tools/noto/diary",  -- where diary entries live
+      tasks_path = "tasks",               -- note files dir, relative to vault
+
+      sections = {
+        { name = "P0 (Overdue)",
+          query = "not done\ndue before today\nsort by due" },
+        { name = "P1 (Due Today)",
+          query = "not done\ndue today\nsort by due" },
+        { name = "All Pending",
+          query = "not done\n(due after today) OR (no due date)" },
+        { name = "Recently Done",
+          query = "done\ncompleted in last 7 days\nsort by due",
+          collapsed = true },
+      },
+
+      symbols = {
+        todo        = "✗",
+        in_progress = "◐",
+        done        = "✓",
+        cancelled   = "●",
+      },
+
+      width  = 0.6,   -- float width  as a fraction of the editor
+      height = 0.7,   -- float height as a fraction of the editor
+    })
+<
+Configuration fields:~
+
+    vault_path    (string)  Root of your markdown vault. `~` is expanded.
+    diary_path    (string)  Directory holding dated diary files
+                            (`YYYY-MM-DD.md`). New tasks created with
+                            |:TaskCreate| are appended to today's diary file.
+    tasks_path    (string)  Directory (relative to `vault_path`) where note
+                            files are created when you open a task's context
+                            with no existing link. See |tasks-note-view|.
+
+    sections      (table)   Ordered list of dashboard sections. Each entry:
+                              name      (string) Section header text.
+                              query     (string) A query block, newline
+                                        separated, evaluated against all
+                                        scanned tasks. See |tasks-query|.
+                              collapsed (boolean, optional) Start collapsed.
+
+    symbols       (table)   Status glyphs rendered in the dashboard for the
+                            four statuses (see |tasks-format|).
+
+    width         (number)  Float width  as a fraction of the editor (0–1).
+    height        (number)  Float height as a fraction of the editor (0–1).
+
+==============================================================================
+5. TASK FORMAT                                                   *tasks-format*
+
+A task is a markdown checkbox line carrying a `#task` tag: >markdown
+    - [ ] #task Description [[optional/note-link]]  [due:: YYYY-MM-DD]  [priority:: high]  [completion:: YYYY-MM-DD]
+<
+Examples: >markdown
+    - [ ] #task Ship the API changes  [due:: 2026-03-25]  [priority:: high]
+    - [/] #task Review PR from @loremipsum  [due:: 2026-03-24]
+    - [x] #task Fix auth middleware  [due:: 2026-03-20]  [completion:: 2026-03-21]
+    - [-] #task Migrate to Redis (cancelled)
+<
+Statuses:~
+    [ ]   todo
+    [/]   in-progress
+    [x]   done
+    [-]   cancelled
+
+Field reference:~
+                                                            *tasks-fields*
+    Checkbox       Required.  One of `[ ]` `[/]` `[x]` `[-]`.
+    #task          Required.  Marker that identifies the line as a task.
+    Description    Required.  Free text; may include markdown links and
+                              @mentions.
+    [[link]]       Optional.  Wiki-link to a note file holding task context.
+    [due:: DATE]   Optional.  Due date in `YYYY-MM-DD`.
+    [priority:: L] Optional.  One of `highest` `high` `medium` `low` `lowest`.
+    [completion::] Optional.  `YYYY-MM-DD`; auto-added when marking
+                              done/cancelled.
+
+                                                            *tasks-date-input*
+Date input~
+    Wherever a due date is prompted (e.g. |:TaskCreate|, `e` in the
+    dashboard), these inputs are accepted and resolved to `YYYY-MM-DD`:
+
+      2026-03-25     an explicit ISO date
+      today          tomorrow
+      tmr / tmrw     yesterday
+      next week      (= +7 days)
+      +Nd / +N       N days from now (e.g. `+3d`, `+7`)
+
+    An empty input clears the due date.
+
+==============================================================================
+6. COMMANDS                                                    *tasks-commands*
+
+                                                                      *:Tasks*
+:Tasks              Open the floating dashboard. See |tasks-dashboard|.
+
+                                                                 *:TaskCreate*
+:TaskCreate         Create a new task. Prompts for description, due date,
+                    priority, and an optional note link, then appends the
+                    task to today's file in `diary_path`.
+
+                                                                 *:TaskToggle*
+:TaskToggle         Toggle the status of the task on the current line,
+                    cycling `[ ]` -> `[/]` -> `[x]` -> `[-]` -> `[ ]`.
+                    Bound to `<C-Space>` in markdown/vimwiki buffers; see
+                    |tasks-inline|.
+
+                                                                  *:TaskQuery*
+:TaskQuery          Evaluate the nearest ```tasks block (the one the cursor
+                    is in, else the nearest above, else the nearest below)
+                    and show its results in the dashboard. See |tasks-query|.
+
+                                                                   *:TaskFind*
+:TaskFind           Open a telescope picker across all tasks in the vault.
+                    Requires telescope.nvim.
+
+Suggested mappings (which-key): >lua
+    t = {
+      name = "Tasks",
+      d = { "<cmd>Tasks<cr>",      "Dashboard" },
+      f = { "<cmd>TaskFind<cr>",   "Find" },
+      n = { "<cmd>TaskCreate<cr>", "New" },
+      t = { "<cmd>TaskToggle<cr>", "Toggle" },
+      q = { "<cmd>TaskQuery<cr>",  "Query Block" },
+    }
+<
+==============================================================================
+7. THE DASHBOARD                                              *tasks-dashboard*
+
+|:Tasks| opens a floating window listing your tasks grouped into the sections
+defined in |tasks-setup| (by default: P0 overdue, P1 due today, all pending,
+and a collapsed "Recently Done"). Tasks are scanned from the vault with
+ripgrep each time the dashboard opens or refreshes.
+
+  - A `📎` marker means the task has a linked note (|tasks-note-view|).
+  - Priorities render inline as `▲▲ ▲ ━ ▼ ▼▼` with color coding.
+  - `j` / `k` jump between task lines, skipping headers and blanks.
+  - The "Recently Done" section starts collapsed; `<Tab>` expands it.
+
+==============================================================================
+8. DASHBOARD KEYMAPS                                  *tasks-dashboard-keymaps*
+
+These mappings are buffer-local to the dashboard window:
+
+    x          Mark the task done.
+    p          Mark the task in-progress.
+    -          Mark the task cancelled.
+    <Space>    Mark the task todo.
+    e          Edit the task: description, due date, priority. Renames the
+               linked note file automatically when applicable.
+    <CR>       Open the task's note context inline (|tasks-note-view|).
+               Creates a note file + wiki-link if none exists yet.
+    o          Jump to the source file at the task's line.
+    n          Create a new task (same flow as |:TaskCreate|).
+    /          Fuzzy search bar; filters live as you type (|tasks-search|).
+    l          Filter by label via telescope picker (|tasks-labels|).
+    L          Clear the active label filter.
+    u          Undo the last status change.
+    <C-r>      Redo.
+    <Tab>      Expand / collapse the section under the cursor.
+    r          Refresh (re-scan the vault).
+    q          Close the dashboard.
+    <Esc>      Clear an active search/label filter, else close.
+
+==============================================================================
+9. NOTE VIEW                                                  *tasks-note-view*
+
+Tasks can link to a note file for context via a wiki-link: >markdown
+    - [/] #task Refactor payment service [[tasks/refactor-payments]]  [due:: 2026-03-25]
+<
+The linked file (e.g. `tasks/refactor-payments.md`, resolved under
+`vault_path`) holds whatever context you want: description, links, subtasks,
+scratch notes.
+
+Press `<CR>` on a task in the dashboard to open its note *inline*, fully
+editable in the same floating window. If the task has no link yet, a note
+file is created under `tasks_path` and a wiki-link is added to the task line.
+
+Note-view mappings:~
+    :w           Save and return to the task list.
+    :wq / :q     Same — save and return.
+    <leader>w    Save and return to the task list.
+    <CR>         Open the note in a full (non-float) buffer.
+
+==============================================================================
+10. SEARCH                                                       *tasks-search*
+
+Press `/` in the dashboard. A search bar appears above the float. Type to
+fuzzy-filter across task descriptions, dates, priorities, and tags.
+
+    <CR> / <Esc>   Accept the filter and return to the filtered list.
+    <C-c>          Clear the filter.
+    <Esc>          (in the dashboard) Clear an active filter.
+
+==============================================================================
+11. LABELS                                                       *tasks-labels*
+
+Tag tasks with an extra `#label` (any `#tag` besides `#task`) to group them by
+project: >markdown
+    - [ ] #task #api-team Deploy API service  [due:: 2026-03-28]
+    - [ ] #task #otel Estimate timelines for OTel migration
+<
+Press `l` in the dashboard to open the label picker (telescope-powered,
+searchable). Selecting a label filters the dashboard into a status-grouped
+view of that project's tasks: In Progress, Todo, and Done.
+
+Press `L` to clear the filter and return to the default urgency view.
+
+==============================================================================
+12. INLINE RENDERING & TOGGLE                                    *tasks-inline*
+
+Inline highlighting~
+    In markdown / vimwiki buffers, `#task` and `#label` tags are rendered as
+    colored pills in normal mode. Highlights clear in insert mode so you see
+    the raw markdown while editing. Motions are unaffected.
+
+                                                              *tasks-toggle*
+Inline toggle~
+    `<C-Space>` on any `#task` line cycles the status:
+
+        [ ] -> [/] -> [x] -> [-] -> [ ]
+
+    On non-task lines it falls back to `VimwikiToggleListItem`. The mapping is
+    installed on `markdown` and `vimwiki` buffers and is also reachable via
+    `<C-space>` and `<Nul>` (terminals send Ctrl-Space differently). The
+    same action is available as |:TaskToggle|.
+
+==============================================================================
+13. QUERY BLOCKS                                                  *tasks-query*
+
+Note: This feature is experimental and may not be supported going forward.
+
+If your markdown files contain query blocks like: >markdown
+    ```tasks
+    not done
+    due before today
+    sort by due
+    ```
+<
+then |:TaskQuery| evaluates the nearest block and shows results in the
+dashboard. The same query language powers the dashboard `sections` in
+|tasks-setup|.
+
+                                                            *tasks-query-clauses*
+Supported filter clauses (combined with AND):~
+    not done
+    done                       (alias: is done)
+    due today
+    due before today
+    due after today
+    no due date
+    has due date
+    priority is <level>        highest|high|medium|low|lowest
+    completed in last N days   e.g. `completed in last 7 days`
+
+Compound:~
+    (clause A) OR (clause B)   e.g. `(due after today) OR (no due date)`
+
+Sort directives:~
+    sort by due
+    sort by priority
+
+Blank lines and the directive `short mode` are ignored. Unrecognized clauses
+are skipped silently.
+
+==============================================================================
+14. HIGHLIGHT GROUPS                                         *tasks-highlights*
+
+All groups are defined on |tasks.setup()|. If catppuccin (mocha) is
+installed, colors are pulled from its palette; otherwise built-in defaults
+are used. Override any group after setup with |nvim_set_hl()| to recolor.
+
+Layout / chrome:~
+    NTasksHeader            Section header text.
+    NTasksTitle             Dashboard title.
+    NTasksDate              Date labels.
+    NTasksBorder            Float border.
+    NTasksHelp              Footer / help hints.
+    NTasksCount             Per-section task counts.
+
+Task / due-state:~
+    NTasksOverdue           Overdue task line.
+    NTasksDueToday          Due-today task line.
+    NTasksPending           Pending task line.
+    NTasksDone              Done task line (strikethrough).
+    NTasksCancelled         Cancelled task line (strikethrough).
+    NTasksDueDateOverdue    Due date, overdue.
+    NTasksDueDateToday      Due date, today.
+    NTasksDueDateFuture     Due date, future.
+
+Status symbols:~
+    NTasksSymbolTodo        Todo glyph.
+    NTasksSymbolProgress    In-progress glyph.
+    NTasksSymbolDone        Done glyph.
+    NTasksSymbolCancelled   Cancelled glyph.
+
+Priority indicators:~
+    NTasksPrioHighest       NTasksPrioHigh    NTasksPrioMedium
+    NTasksPrioLow           NTasksPrioLowest
+
+Pills (inline rendering & dashboard):~
+    NTasksTagPill           `#task` pill.
+    NTasksLabelPill         `#label` pill (dashboard).
+    NTasksLabelInline       `#label` inline in buffers.
+    NTasksLinkPill          `[[wiki-link]]` pill.
+
+==============================================================================
+15. LICENSE                                                      *tasks-license*
+
+MIT.
+
+There are already many task managers; this setup is tailored to the author's
+personal note-taking workflow and shared in case others find it useful.
+
+vim:tw=78:ts=8:ft=help:norl:
