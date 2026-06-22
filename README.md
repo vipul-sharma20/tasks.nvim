@@ -255,20 +255,38 @@ Date input accepts: `2026-03-25`, `today`, `tomorrow`, `tmr`, `+3d`, `+7d`, `nex
 
 ## Features
 
-- Floating dashboard (:Tasks) with configurable sections — P0 (overdue), P1 (due today), all pending, recently done
-- Inline task status toggle — <C-Space> cycles [ ] → [/] → [x] → [-] on #task lines
-- Task context via wiki-links — [[tasks/slug]] links to note files, viewable and editable inline in the dashboard float
-- fzf-style search bar — / in dashboard for live fuzzy filtering across descriptions, dates, tags
-- Full task editing — e to edit description, due date, and priority in one flow; renames linked note files automatically
-- Status management — x/p/-/<Space> to mark done/in-progress/cancelled/todo with undo (u) and redo (<C-r>)
-- Priority indicators — ▲▲ ▲ ━ ▼ ▼▼ rendered inline in the dashboard with color coding
-- Collapsible sections — <Tab> to expand/collapse (recently done section collapsed by default)
-- Natural date input — accepts today, tomorrow, +3d, next week when setting due dates
-- Telescope picker — :TaskFind for fuzzy search across all tasks in the vault
-- Query block evaluation — :TaskQuery evaluates ```tasks blocks from your markdown files
-- Labels — tag tasks with #project, filter dashboard by label via telescope picker, status-grouped view
-- Inline highlighting — #task and #label tags rendered as colored pills in markdown buffers, motions unaffected
-- :w / :wq / :q work naturally in the floating window note view
+- Floating dashboard (`:Tasks`) with configurable sections — P0 (overdue), P1
+  (due today), all pending, recently done
+- Create tasks (`:TaskCreate`, or `n` in the dashboard) — appended to today's
+  diary file, with prompts for due date, priority, and an optional linked note
+- Inline status toggle (`:TaskToggle`, `<C-Space>`) — cycles `[ ]` → `[/]` →
+  `[x]` → `[-]` on `#task` lines, falling back to `VimwikiToggleListItem` on
+  other lines
+- Status management — `x`/`p`/`-`/`<Space>` to mark
+  done/in-progress/cancelled/todo, with undo (`u`) and redo (`<C-r>`)
+- Full task editing — `e` edits description, due date, and priority in one
+  flow; renames the linked note file automatically
+- Task context via wiki-links — `[[/tasks/slug]]` links to note files, viewable
+  and editable inline in the dashboard float; `<CR>` creates the note and link
+  if none exists
+- Jump to source — `o` opens the task's source file at its exact line
+- fzf-style search bar — `/` in the dashboard for live fuzzy filtering across
+  descriptions, dates, and tags
+- Labels — tag tasks with `#project`, then filter the dashboard by label via a
+  telescope picker (`l`) into a status-grouped view; `L` clears the filter
+- Priority indicators — ▲▲ ▲ ━ ▼ ▼▼ rendered inline in the dashboard with color
+  coding
+- Collapsible sections — `<Tab>` to expand/collapse (the recently-done section
+  is collapsed by default)
+- Natural date input — accepts `today`, `tomorrow`, `tmr`, `+3d`, `next week`
+  when setting due dates
+- Telescope picker — `:TaskFind` for fuzzy search across all tasks in the vault
+- Query block evaluation — `:TaskQuery` evaluates `tasks` code blocks in your
+  markdown files
+- Inline highlighting — `#task` and `#label` tags rendered as colored pills in
+  markdown buffers; highlights clear in insert mode, motions unaffected
+- Built-in help — `:help tasks.nvim` for the full documentation
+- `:w` / `:wq` / `:q` work naturally in the floating-window note view
 
 ## License
 
