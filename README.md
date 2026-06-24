@@ -57,7 +57,7 @@ view/edit it inline in the dashboard float.
 
 `:Tasks` opens a floating window with your tasks grouped by urgency:
 
-![Dashboard](assets/dashboard.png)
+![Dashboard](https://github.com/user-attachments/assets/68897be2-ac93-4769-80c8-a42f2a48ee85)
 
 `📎` means the task has a linked note. `j`/`k` skip between tasks.
 
@@ -90,7 +90,7 @@ buffer.
 
 The note opens in the same floating window, fully editable.
 
-![Note view](assets/task-expanded.png)
+![Note view](https://github.com/user-attachments/assets/edcda2bb-047d-4e99-8bcd-e904650bfd8f)
 
 | Key | Action |
 |---|---|
@@ -120,7 +120,7 @@ searchable). Select a label to filter and the dashboard switches to a
 status-grouped view showing all tasks for that project: In Progress, Todo, and
 Done.
 
-![Labels](assets/labels.png)
+![Labels](https://github.com/user-attachments/assets/6e87b896-594d-486a-a8f0-3c6d7fad4b70)
 
 Press `L` to clear the filter and return to the default urgency view.
 
@@ -128,7 +128,7 @@ Press `L` to clear the filter and return to the default urgency view.
 
 `#task` and `#label` tags are highlighted in the buffers in normal mode.
 
-![Task highlighting](assets/task-highlighting.png)
+![Task highlighting](https://github.com/user-attachments/assets/de466589-40c4-43d5-9ee2-7b01fabd1e3d)
 
 Highlights clear in insert mode so you see the raw markdown while editing.
 
